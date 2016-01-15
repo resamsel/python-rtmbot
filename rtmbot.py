@@ -14,9 +14,7 @@ from argparse import ArgumentParser
 
 from slackclient import SlackClient
 
-def dbg(debug_string):
-    if debug:
-        logging.info(debug_string)
+logger = logging.getLogger(__name__)
 
 class RtmBot(object):
     def __init__(self, token):
@@ -47,7 +45,7 @@ class RtmBot(object):
     def input(self, data):
         if "type" in data:
             function_name = "process_" + data["type"]
-            dbg("got {}".format(function_name))
+            logger.debug("got {}".format(function_name))
             for plugin in self.bot_plugins:
                 plugin.register_jobs()
                 plugin.do(function_name, data)
@@ -71,30 +69,31 @@ class RtmBot(object):
             sys.path.insert(0, plugin)
             sys.path.insert(0, directory+'/plugins/')
         for plugin in glob.glob(directory+'/plugins/*.py') + glob.glob(directory+'/plugins/*/*.py'):
-            logging.info(plugin)
+            logger.info('Plugin: %s', plugin)
             name = plugin.split('/')[-1][:-3]
 #            try:
-            self.bot_plugins.append(Plugin(name))
+            self.bot_plugins.append(Plugin(name, bot))
 #            except:
 #                print "error loading plugin %s" % name
 
 class Plugin(object):
-    def __init__(self, name, plugin_config={}):
+    def __init__(self, name, bot, plugin_config={}):
         self.name = name
         self.jobs = []
         self.module = __import__(name)
         self.register_jobs()
         self.outputs = []
         if name in config:
-            logging.info("config found for: " + name)
+            logger.info("config found for: " + name)
             self.module.config = config[name]
+        self.module.bot = bot
         if 'setup' in dir(self.module):
             self.module.setup()
     def register_jobs(self):
         if 'crontable' in dir(self.module):
             for interval, function in self.module.crontable:
                 self.jobs.append(Job(interval, eval("self.module."+function)))
-            logging.info(self.module.crontable)
+            logger.debug('Crontable: %s', self.module.crontable)
             self.module.crontable = []
         else:
             self.module.crontable = []
@@ -105,14 +104,14 @@ class Plugin(object):
                 try:
                     eval("self.module."+function_name)(data)
                 except:
-                    dbg("problem in module {} {}".format(function_name, data))
+                    logger.warn("problem in module {} {}".format(function_name, data))
             else:
                 eval("self.module."+function_name)(data)
         if "catch_all" in dir(self.module):
             try:
                 self.module.catch_all(data)
             except:
-                dbg("problem in catch all")
+                logger.error("problem in catch all")
     def do_jobs(self):
         for job in self.jobs:
             job.check()
@@ -121,7 +120,7 @@ class Plugin(object):
         while True:
             if 'outputs' in dir(self.module):
                 if len(self.module.outputs) > 0:
-                    logging.info("output from {}".format(self.module))
+                    logger.debug("output from {}".format(self.module))
                     output.append(self.module.outputs.pop(0))
                 else:
                     break
@@ -144,7 +143,7 @@ class Job(object):
                 try:
                     self.function()
                 except:
-                    dbg("problem")
+                    logger.error("problem")
             else:
                 self.function()
             self.lastrun = time.time()
@@ -156,14 +155,20 @@ class UnknownChannel(Exception):
 
 def main_loop():
     if "LOGFILE" in config:
-        logging.basicConfig(filename=config["LOGFILE"], level=logging.INFO, format='%(asctime)s %(message)s')
-    logging.info(directory)
+        logging.basicConfig(
+            filename=config["LOGFILE"],
+            level=logging.INFO,
+            format='%(asctime)s %(levelname)s %(name)s: %(message)s'
+        )
+    logger.info(directory)
     try:
         bot.start()
     except KeyboardInterrupt:
         sys.exit(0)
+    except SystemExit:
+        pass
     except:
-        logging.exception('OOPS')
+        logger.exception('OOPS')
 
 
 def parse_args():
