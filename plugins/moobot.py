@@ -5,8 +5,8 @@ import datetime
 
 HELP_FORMAT = """:cow2: usage:
 
-{pattern.pattern}: ... - channel messages
-... - direct messages
+{pattern.pattern}: ... - :slack: channel messages
+... - :bust_in_silhouette: direct messages
 
 *everyone*
 {help.pattern} - this message
@@ -62,7 +62,10 @@ def setup():
     logger.info('Started')
     stats.started = datetime.datetime.now()
 
-    process_message(config['master'])
+    master = Generic(config['master'])
+    user = get_user(master.user)
+    channel = get_channel(master.channel, user)
+    moo(channel, user, master.text, master.response)
 
 
 def get(method, key, **kwargs):
@@ -80,16 +83,29 @@ def get_user(user_id):
     return users[user_id]
 
 
-def get_channel(channel_id):
+def get_channel(channel_id, user=None):
     if channel_id not in channels:
         channels[channel_id] = get('channels.info', 'channel', channel=channel_id)
-    return channels[channel_id]
+    channel = channels[channel_id]
+    if channel is None and user is not None:
+        channel = Generic({
+            'id': channel_id,
+            'name': user.name,
+            'is_channel': False
+        })
+    return channel
 
 
 def moo(channel, user, text, message):
+    logger.debug('moo(%r, %r, %s, %s)', channel, user, text, message)
     outputs.append([channel.id, message])
     stats.messages += 1
-    logger.info('I mooed for {1} in channel #{0} ({2})'.format(channel.name, user.name, text))
+    logger.info(
+        'I mooed for %s in channel #%s (%s): %s',
+        user.name,
+        channel.name,
+        text,
+        message)
 
 
 def get_response(channel, user, text):
@@ -185,16 +201,10 @@ def check_action(channel, user, text):
 
 
 def process_message(message):
-    logger.info(repr(message))
+    # logger.info(repr(message))
     if 'text' in message and 'channel' in message and 'user' in message:
         user = get_user(message['user'])
-        channel = get_channel(message['channel'])
-        if channel is None:
-            channel = Generic({
-                'id': message['channel'],
-                'name': user.name,
-                'is_channel': False
-            })
+        channel = get_channel(message['channel'], user)
         text = message['text']
         if (user.name != 'moobot'
                 and (
